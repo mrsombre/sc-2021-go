@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -16,18 +17,35 @@ var (
 )
 
 const (
-	drRight       uint8 = 0
-	drTopRight    uint8 = 1
-	drTopLeft     uint8 = 2
-	drLeft        uint8 = 3
-	drBottomLeft  uint8 = 4
-	drBottomRight uint8 = 5
+	drRight       = 0
+	drTopRight    = 1
+	drTopLeft     = 2
+	drLeft        = 3
+	drBottomLeft  = 4
+	drBottomRight = 5
 )
 
-var directions = [...]uint8{drRight, drTopRight, drTopLeft, drLeft, drBottomLeft, drBottomRight}
+var directions = [6]int{drRight, drTopRight, drTopLeft, drLeft, drBottomLeft, drBottomRight}
 
 func l(data ...interface{}) {
 	fmt.Fprintln(os.Stderr, data...)
+}
+
+func boolToInt(value bool) int {
+	var result int
+	if value {
+		result = 1
+	}
+	return result
+}
+
+func inNeighs(slice []int, test int) bool {
+	for _, item := range slice {
+		if test == item {
+			return true
+		}
+	}
+	return false
 }
 
 type Field struct {
@@ -35,16 +53,18 @@ type Field struct {
 }
 
 type Cell struct {
-	Index  uint8
-	Rich   uint8
-	Neighs [6]int8
+	Index   int
+	Rich    uint8
+	Neighs  []int
+	Neighs2 []int
+	Neighs3 []int
 }
 
 func (f *Field) FromStream(scanner *bufio.Scanner) {
 	scanner.Scan()
 	for i := 0; i < cellsCount; i++ {
 		scanner.Scan()
-		cell := &Cell{}
+		cell := &Cell{Neighs: make([]int, 6)}
 		fmt.Sscan(
 			scanner.Text(),
 			&cell.Index,
@@ -58,15 +78,54 @@ func (f *Field) FromStream(scanner *bufio.Scanner) {
 		)
 		f.Cells[i] = cell
 	}
+
+	// count 2nd neighs
+	for _, cell := range f.Cells {
+		for _, neigh1 := range cell.Neighs {
+			if neigh1 == -1 {
+				continue
+			}
+			for _, neigh2 := range f.Cells[neigh1].Neighs {
+				if neigh2 == -1 || neigh2 == cell.Index {
+					continue
+				}
+				// check
+				if inNeighs(cell.Neighs, neigh2) || inNeighs(cell.Neighs2, neigh2) {
+					continue
+				}
+				cell.Neighs2 = append(cell.Neighs2, neigh2)
+			}
+		}
+		sort.Ints(cell.Neighs2)
+	}
+
+	// count 3nd neighs
+	for _, cell := range f.Cells {
+		for _, neigh2 := range cell.Neighs2 {
+			for _, neigh3 := range f.Cells[neigh2].Neighs {
+				if neigh3 == -1 || neigh3 == cell.Index {
+					continue
+				}
+				// check
+				if inNeighs(cell.Neighs, neigh3) || inNeighs(cell.Neighs2, neigh3) || inNeighs(cell.Neighs3, neigh3) {
+					continue
+				}
+				cell.Neighs3 = append(cell.Neighs3, neigh3)
+			}
+		}
+		sort.Ints(cell.Neighs3)
+	}
 }
 
 func (f *Field) Export() string {
 	var result []string
+
 	result = append(result, `37`)
 	for _, cell := range f.Cells {
 		neigh := fmt.Sprintf("%d %d %d %d %d %d", cell.Neighs[0], cell.Neighs[1], cell.Neighs[2], cell.Neighs[3], cell.Neighs[4], cell.Neighs[5])
 		result = append(result, fmt.Sprintf("%d %d %s", cell.Index, cell.Rich, neigh))
 	}
+
 	return strings.Join(result, "\n")
 }
 
@@ -82,7 +141,8 @@ type Player struct {
 }
 
 type Tree struct {
-	Index, Size    uint8
+	Index          int
+	Size           uint8
 	IsMine, IsUsed bool
 }
 
@@ -117,6 +177,22 @@ func (s *State) FromStream(scanner *bufio.Scanner) {
 	for i := uint8(0); i < num; i++ {
 		scanner.Scan()
 	}
+}
+
+func (s *State) Export() string {
+	var result []string
+
+	result = append(result, fmt.Sprintf("%d", s.Day))
+	result = append(result, fmt.Sprintf("%d", s.Nutrients))
+	result = append(result, fmt.Sprintf("%d %d", s.Players[1].Sun, s.Players[1].Score))
+	result = append(result, fmt.Sprintf("%d %d %d", s.Players[0].Sun, s.Players[0].Score, boolToInt(s.Players[0].IsWaiting)))
+
+	result = append(result, fmt.Sprintf("%d", len(s.Trees)))
+	for _, tree := range s.Trees {
+		result = append(result, fmt.Sprintf("%d %d %d %d", tree.Index, tree.Size, boolToInt(tree.IsMine), boolToInt(tree.IsUsed)))
+	}
+
+	return strings.Join(result, "\n")
 }
 
 func main() {

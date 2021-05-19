@@ -20,6 +20,12 @@ func TestField_FromStream(t *testing.T) {
 
 	assert.EqualValues(t, 0, field.Cells[0].Index)
 	assert.EqualValues(t, 3, field.Cells[0].Rich)
+
+	assert.Contains(t, field.Cells[1].Neighs2, 35)
+	assert.NotContains(t, field.Cells[1].Neighs2, 34)
+
+	assert.Contains(t, field.Cells[34].Neighs3, 5)
+	assert.NotContains(t, field.Cells[34].Neighs2, 4)
 }
 
 func TestField_Export(t *testing.T) {
@@ -57,4 +63,17 @@ func TestState_FromStream(t *testing.T) {
 	assert.True(t, state.Players[0].IsWaiting)
 	assert.EqualValues(t, 19, state.Players[0].Sun)
 	assert.EqualValues(t, 2, state.Players[0].Score)
+}
+
+func TestState_Export(t *testing.T) {
+	reader, err := os.Open(`./fixtures/game.txt`)
+	if err != nil {
+		assert.NoError(t, err)
+	}
+	scanner := bufio.NewScanner(reader)
+
+	state := State{}
+	state.FromStream(scanner)
+
+	assert.Equal(t, 126, len(state.Export()))
 }
