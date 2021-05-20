@@ -18,14 +18,18 @@ func TestField_FromStream(t *testing.T) {
 	field := Field{}
 	field.FromStream(scanner)
 
-	assert.EqualValues(t, 0, field.Cells[0].Index)
-	assert.EqualValues(t, 3, field.Cells[0].Rich)
+	assert.EqualValues(t, 0, field.Cells[0].index)
+	assert.EqualValues(t, 3, field.Cells[0].rich)
 
-	assert.Contains(t, field.Cells[1].Neighs2, 35)
-	assert.NotContains(t, field.Cells[1].Neighs2, 34)
+	assert.Contains(t, field.Cells[19].neighs1, index(20))
+	assert.Contains(t, field.Cells[19].neighs1, index(-1))
+	assert.NotContains(t, field.Cells[1].neighs1, index(21))
 
-	assert.Contains(t, field.Cells[34].Neighs3, 5)
-	assert.NotContains(t, field.Cells[34].Neighs2, 4)
+	assert.Contains(t, field.Cells[1].neighs2, index(35))
+	assert.NotContains(t, field.Cells[1].neighs2, index(34))
+
+	assert.Contains(t, field.Cells[34].neighs3, index(5))
+	assert.NotContains(t, field.Cells[34].neighs2, index(4))
 }
 
 func TestField_Export(t *testing.T) {

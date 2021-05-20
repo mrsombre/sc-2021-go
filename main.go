@@ -8,28 +8,33 @@ import (
 	"strings"
 )
 
+type (
+	direction int8
+	index     int8
+	size      int8
+	num       int16
+)
+
 const (
 	cellsCount = 37
+
+	emptyCell index = -1
+
+	dirRgt    direction = 0
+	dirTopRgt direction = 1
+	dirTopLft direction = 2
+	dirLft    direction = 3
+	dirBtmLft direction = 4
+	dirBtmRgt direction = 5
+)
+
+var (
+	directions = [6]direction{dirRgt, dirTopRgt, dirTopLft, dirLft, dirBtmLft, dirBtmRgt}
 )
 
 var (
 	scanner = bufio.NewScanner(os.Stdin)
 )
-
-const (
-	drRight       = 0
-	drTopRight    = 1
-	drTopLeft     = 2
-	drLeft        = 3
-	drBottomLeft  = 4
-	drBottomRight = 5
-)
-
-var directions = [6]int{drRight, drTopRight, drTopLeft, drLeft, drBottomLeft, drBottomRight}
-
-func l(data ...interface{}) {
-	fmt.Fprintln(os.Stderr, data...)
-}
 
 func boolToInt(value bool) int {
 	var result int
@@ -39,81 +44,104 @@ func boolToInt(value bool) int {
 	return result
 }
 
-func inNeighs(slice []int, test int) bool {
-	for _, item := range slice {
-		if test == item {
-			return true
-		}
-	}
-	return false
-}
+type indexes []index
+
+func (x indexes) Len() int           { return len(x) }
+func (x indexes) Less(i, j int) bool { return x[i] < x[j] }
+func (x indexes) Swap(i, j int)      { x[i], x[j] = x[j], x[i] }
+func (x indexes) Sort()              { sort.Sort(x) }
 
 type Field struct {
 	Cells [37]*Cell
 }
 
 type Cell struct {
-	Index   int
-	Rich    uint8
-	Neighs  []int
-	Neighs2 []int
-	Neighs3 []int
+	index   index
+	rich    size
+	neighs1 [6]index
+	neighs2 indexes
+	neighs3 indexes
 }
 
 func (f *Field) FromStream(scanner *bufio.Scanner) {
+	f.Cells = [37]*Cell{}
+
+	neighsMap := make(map[index]map[int]map[index]index, 37)
+
 	scanner.Scan()
 	for i := 0; i < cellsCount; i++ {
 		scanner.Scan()
-		cell := &Cell{Neighs: make([]int, 6)}
+
+		cell := &Cell{neighs2: make([]index, 0, 12), neighs3: make([]index, 0, 18)}
 		fmt.Sscan(
 			scanner.Text(),
-			&cell.Index,
-			&cell.Rich,
-			&cell.Neighs[drRight],
-			&cell.Neighs[drTopRight],
-			&cell.Neighs[drTopLeft],
-			&cell.Neighs[drLeft],
-			&cell.Neighs[drBottomLeft],
-			&cell.Neighs[drBottomRight],
+			&cell.index, &cell.rich,
+			&cell.neighs1[0], &cell.neighs1[1], &cell.neighs1[2], &cell.neighs1[3], &cell.neighs1[4], &cell.neighs1[5],
 		)
+
+		neighsMap[cell.index] = make(map[int]map[index]index, 4)
+		neighsMap[cell.index][1] = make(map[index]index, 6)
+		neighsMap[cell.index][2] = make(map[index]index)
+		neighsMap[cell.index][3] = make(map[index]index)
+
+		for _, neigh1 := range cell.neighs1 {
+			if neigh1 == emptyCell {
+				continue
+			}
+			neighsMap[cell.index][1][neigh1] = neigh1
+		}
 		f.Cells[i] = cell
 	}
 
 	// count 2nd neighs
 	for _, cell := range f.Cells {
-		for _, neigh1 := range cell.Neighs {
-			if neigh1 == -1 {
+		for _, neigh1 := range cell.neighs1 {
+			if neigh1 == emptyCell {
 				continue
 			}
-			for _, neigh2 := range f.Cells[neigh1].Neighs {
-				if neigh2 == -1 || neigh2 == cell.Index {
+			for _, neigh2 := range f.Cells[neigh1].neighs1 {
+				if neigh2 == emptyCell || neigh2 == cell.index {
 					continue
 				}
-				// check
-				if inNeighs(cell.Neighs, neigh2) || inNeighs(cell.Neighs2, neigh2) {
+				// in 1
+				if _, found := neighsMap[cell.index][1][neigh2]; found {
 					continue
 				}
-				cell.Neighs2 = append(cell.Neighs2, neigh2)
+				// in 2
+				if _, found := neighsMap[cell.index][2][neigh2]; found {
+					continue
+				}
+				cell.neighs2 = append(cell.neighs2, neigh2)
+				neighsMap[cell.index][2][neigh2] = neigh2
 			}
 		}
-		sort.Ints(cell.Neighs2)
+		cell.neighs2.Sort()
 	}
 
 	// count 3nd neighs
 	for _, cell := range f.Cells {
-		for _, neigh2 := range cell.Neighs2 {
-			for _, neigh3 := range f.Cells[neigh2].Neighs {
-				if neigh3 == -1 || neigh3 == cell.Index {
+		for _, neigh2 := range cell.neighs2 {
+			for _, neigh3 := range f.Cells[neigh2].neighs1 {
+				if neigh3 == emptyCell {
 					continue
 				}
-				// check
-				if inNeighs(cell.Neighs, neigh3) || inNeighs(cell.Neighs2, neigh3) || inNeighs(cell.Neighs3, neigh3) {
+				// in 1
+				if _, found := neighsMap[cell.index][1][neigh3]; found {
 					continue
 				}
-				cell.Neighs3 = append(cell.Neighs3, neigh3)
+				// in 2
+				if _, found := neighsMap[cell.index][2][neigh3]; found {
+					continue
+				}
+				// in 3
+				if _, found := neighsMap[cell.index][3][neigh3]; found {
+					continue
+				}
+				cell.neighs3 = append(cell.neighs3, neigh3)
+				neighsMap[cell.index][3][neigh3] = neigh3
 			}
 		}
-		sort.Ints(cell.Neighs3)
+		cell.neighs3.Sort()
 	}
 }
 
@@ -122,27 +150,27 @@ func (f *Field) Export() string {
 
 	result = append(result, `37`)
 	for _, cell := range f.Cells {
-		neigh := fmt.Sprintf("%d %d %d %d %d %d", cell.Neighs[0], cell.Neighs[1], cell.Neighs[2], cell.Neighs[3], cell.Neighs[4], cell.Neighs[5])
-		result = append(result, fmt.Sprintf("%d %d %s", cell.Index, cell.Rich, neigh))
+		neigh := fmt.Sprintf("%d %d %d %d %d %d", cell.neighs1[0], cell.neighs1[1], cell.neighs1[2], cell.neighs1[3], cell.neighs1[4], cell.neighs1[5])
+		result = append(result, fmt.Sprintf("%d %d %s", cell.index, cell.rich, neigh))
 	}
 
 	return strings.Join(result, "\n")
 }
 
 type State struct {
-	Day, Nutrients uint8
+	Day, Nutrients size
 	Players        [2]*Player
 	Trees          []*Tree
 }
 
 type Player struct {
-	Sun, Score        uint16
+	Sun, Score        num
 	IsMine, IsWaiting bool
 }
 
 type Tree struct {
-	Index          int
-	Size           uint8
+	Index          index
+	Size           size
 	IsMine, IsUsed bool
 }
 
@@ -161,11 +189,11 @@ func (s *State) FromStream(scanner *bufio.Scanner) {
 	opp := &Player{IsMine: false}
 	fmt.Sscan(scanner.Text(), &opp.Sun, &opp.Score, &opp.IsWaiting)
 	s.Players[0] = opp
-	var num uint8
+	var num int
 	// trees
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &num)
-	for i := uint8(0); i < num; i++ {
+	for i := 0; i < num; i++ {
 		scanner.Scan()
 		tree := &Tree{}
 		fmt.Sscan(scanner.Text(), &tree.Index, &tree.Size, &tree.IsMine, &tree.IsUsed)
@@ -174,7 +202,7 @@ func (s *State) FromStream(scanner *bufio.Scanner) {
 	// actions
 	scanner.Scan()
 	fmt.Sscan(scanner.Text(), &num)
-	for i := uint8(0); i < num; i++ {
+	for i := 0; i < num; i++ {
 		scanner.Scan()
 	}
 }
@@ -200,4 +228,8 @@ func main() {
 	field.FromStream(scanner)
 
 	println(field.Export())
+}
+
+func l(data ...interface{}) {
+	fmt.Fprintln(os.Stderr, data...)
 }
