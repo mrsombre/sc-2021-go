@@ -32,57 +32,49 @@ var (
 	directions = [6]direction{dirRgt, dirTopRgt, dirTopLft, dirLft, dirBtmLft, dirBtmRgt}
 )
 
-var (
-	scanner = bufio.NewScanner(os.Stdin)
+type (
+	indexSlice []index
+	indexMap   map[index]index
 )
 
-func boolToInt(value bool) int {
-	var result int
-	if value {
-		result = 1
-	}
-	return result
-}
-
-type indexes []index
-
-func (x indexes) Len() int           { return len(x) }
-func (x indexes) Less(i, j int) bool { return x[i] < x[j] }
-func (x indexes) Swap(i, j int)      { x[i], x[j] = x[j], x[i] }
-func (x indexes) Sort()              { sort.Sort(x) }
-
-type Field struct {
-	Cells [37]*Cell
-}
+func (x indexSlice) Len() int           { return len(x) }
+func (x indexSlice) Less(i, j int) bool { return x[i] < x[j] }
+func (x indexSlice) Swap(i, j int)      { x[i], x[j] = x[j], x[i] }
+func (x indexSlice) Sort()              { sort.Sort(x) }
 
 type Cell struct {
 	index   index
 	rich    size
 	neighs1 [6]index
-	neighs2 indexes
-	neighs3 indexes
+	neighs2 indexSlice
+	neighs3 indexSlice
+	vectors [6]indexSlice
 }
 
-func (f *Field) FromStream(scanner *bufio.Scanner) {
-	f.Cells = [37]*Cell{}
+type Field struct {
+	cells [37]*Cell
+}
 
-	neighsMap := make(map[index]map[int]map[index]index, 37)
+func (f *Field) fromStream(scanner *bufio.Scanner) {
+	f.cells = [37]*Cell{}
+
+	neighsMap := make([][]indexMap, 37)
 
 	scanner.Scan()
 	for i := 0; i < cellsCount; i++ {
 		scanner.Scan()
 
-		cell := &Cell{neighs2: make([]index, 0, 12), neighs3: make([]index, 0, 18)}
+		cell := &Cell{neighs2: make(indexSlice, 0, 12), neighs3: make(indexSlice, 0, 18)}
 		fmt.Sscan(
 			scanner.Text(),
 			&cell.index, &cell.rich,
 			&cell.neighs1[0], &cell.neighs1[1], &cell.neighs1[2], &cell.neighs1[3], &cell.neighs1[4], &cell.neighs1[5],
 		)
 
-		neighsMap[cell.index] = make(map[int]map[index]index, 4)
-		neighsMap[cell.index][1] = make(map[index]index, 6)
-		neighsMap[cell.index][2] = make(map[index]index)
-		neighsMap[cell.index][3] = make(map[index]index)
+		neighsMap[cell.index] = make([]indexMap, 4)
+		neighsMap[cell.index][1] = make(indexMap, 6)
+		neighsMap[cell.index][2] = make(indexMap, 12)
+		neighsMap[cell.index][3] = make(indexMap, 18)
 
 		for _, neigh1 := range cell.neighs1 {
 			if neigh1 == emptyCell {
@@ -90,16 +82,16 @@ func (f *Field) FromStream(scanner *bufio.Scanner) {
 			}
 			neighsMap[cell.index][1][neigh1] = neigh1
 		}
-		f.Cells[i] = cell
+		f.cells[i] = cell
 	}
 
 	// count 2nd neighs
-	for _, cell := range f.Cells {
+	for _, cell := range f.cells {
 		for _, neigh1 := range cell.neighs1 {
 			if neigh1 == emptyCell {
 				continue
 			}
-			for _, neigh2 := range f.Cells[neigh1].neighs1 {
+			for _, neigh2 := range f.cells[neigh1].neighs1 {
 				if neigh2 == emptyCell || neigh2 == cell.index {
 					continue
 				}
@@ -119,9 +111,9 @@ func (f *Field) FromStream(scanner *bufio.Scanner) {
 	}
 
 	// count 3nd neighs
-	for _, cell := range f.Cells {
+	for _, cell := range f.cells {
 		for _, neigh2 := range cell.neighs2 {
-			for _, neigh3 := range f.Cells[neigh2].neighs1 {
+			for _, neigh3 := range f.cells[neigh2].neighs1 {
 				if neigh3 == emptyCell {
 					continue
 				}
@@ -143,13 +135,31 @@ func (f *Field) FromStream(scanner *bufio.Scanner) {
 		}
 		cell.neighs3.Sort()
 	}
+
+	// sun vectors
+	for _, cell := range f.cells {
+		for _, dir := range directions {
+			cell.vectors[dir] = make(indexSlice, 0, 3)
+			target := cell
+			length := 1
+			for {
+				neigh := target.neighs1[dir]
+				if neigh == emptyCell || length > 3 {
+					break
+				}
+				cell.vectors[dir] = append(cell.vectors[dir], neigh)
+				target = f.cells[neigh]
+				length++
+			}
+		}
+	}
 }
 
-func (f *Field) Export() string {
+func (f *Field) export() string {
 	var result []string
 
 	result = append(result, `37`)
-	for _, cell := range f.Cells {
+	for _, cell := range f.cells {
 		neigh := fmt.Sprintf("%d %d %d %d %d %d", cell.neighs1[0], cell.neighs1[1], cell.neighs1[2], cell.neighs1[3], cell.neighs1[4], cell.neighs1[5])
 		result = append(result, fmt.Sprintf("%d %d %s", cell.index, cell.rich, neigh))
 	}
@@ -157,38 +167,41 @@ func (f *Field) Export() string {
 	return strings.Join(result, "\n")
 }
 
-type State struct {
-	Day, Nutrients size
-	Players        [2]*Player
-	Trees          []*Tree
-}
-
 type Player struct {
-	Sun, Score        num
-	IsMine, IsWaiting bool
+	sun, score        num
+	isMine, isWaiting bool
 }
 
 type Tree struct {
-	Index          index
-	Size           size
-	IsMine, IsUsed bool
+	index          index
+	size           size
+	isMine, isUsed bool
 }
 
-func (s *State) FromStream(scanner *bufio.Scanner) {
+type State struct {
+	day, nutrients size
+	players        [2]*Player
+	trees          []*Tree
+}
+
+func (s *State) fromStream(scanner *bufio.Scanner) {
+	s.players = [2]*Player{}
+	s.trees = make([]*Tree, 0, 16)
+
 	scanner.Scan()
-	fmt.Sscan(scanner.Text(), &s.Day)
+	fmt.Sscan(scanner.Text(), &s.day)
 	scanner.Scan()
-	fmt.Sscan(scanner.Text(), &s.Nutrients)
+	fmt.Sscan(scanner.Text(), &s.nutrients)
 	// me
 	scanner.Scan()
-	me := &Player{IsMine: true}
-	fmt.Sscan(scanner.Text(), &me.Sun, &me.Score)
-	s.Players[1] = me
+	me := &Player{isMine: true}
+	fmt.Sscan(scanner.Text(), &me.sun, &me.score)
+	s.players[1] = me
 	// me
 	scanner.Scan()
-	opp := &Player{IsMine: false}
-	fmt.Sscan(scanner.Text(), &opp.Sun, &opp.Score, &opp.IsWaiting)
-	s.Players[0] = opp
+	opp := &Player{isMine: false}
+	fmt.Sscan(scanner.Text(), &opp.sun, &opp.score, &opp.isWaiting)
+	s.players[0] = opp
 	var num int
 	// trees
 	scanner.Scan()
@@ -196,8 +209,8 @@ func (s *State) FromStream(scanner *bufio.Scanner) {
 	for i := 0; i < num; i++ {
 		scanner.Scan()
 		tree := &Tree{}
-		fmt.Sscan(scanner.Text(), &tree.Index, &tree.Size, &tree.IsMine, &tree.IsUsed)
-		s.Trees = append(s.Trees, tree)
+		fmt.Sscan(scanner.Text(), &tree.index, &tree.size, &tree.isMine, &tree.isUsed)
+		s.trees = append(s.trees, tree)
 	}
 	// actions
 	scanner.Scan()
@@ -207,29 +220,42 @@ func (s *State) FromStream(scanner *bufio.Scanner) {
 	}
 }
 
-func (s *State) Export() string {
+func (s *State) export() string {
 	var result []string
 
-	result = append(result, fmt.Sprintf("%d", s.Day))
-	result = append(result, fmt.Sprintf("%d", s.Nutrients))
-	result = append(result, fmt.Sprintf("%d %d", s.Players[1].Sun, s.Players[1].Score))
-	result = append(result, fmt.Sprintf("%d %d %d", s.Players[0].Sun, s.Players[0].Score, boolToInt(s.Players[0].IsWaiting)))
+	result = append(result, fmt.Sprintf("%d", s.day))
+	result = append(result, fmt.Sprintf("%d", s.nutrients))
+	result = append(result, fmt.Sprintf("%d %d", s.players[1].sun, s.players[1].score))
+	result = append(result, fmt.Sprintf("%d %d %d", s.players[0].sun, s.players[0].score, boolToInt(s.players[0].isWaiting)))
 
-	result = append(result, fmt.Sprintf("%d", len(s.Trees)))
-	for _, tree := range s.Trees {
-		result = append(result, fmt.Sprintf("%d %d %d %d", tree.Index, tree.Size, boolToInt(tree.IsMine), boolToInt(tree.IsUsed)))
+	result = append(result, fmt.Sprintf("%d", len(s.trees)))
+	for _, tree := range s.trees {
+		result = append(result, fmt.Sprintf("%d %d %d %d", tree.index, tree.size, boolToInt(tree.isMine), boolToInt(tree.isUsed)))
 	}
 
 	return strings.Join(result, "\n")
 }
 
 func main() {
-	field := &Field{}
-	field.FromStream(scanner)
+	scanner := bufio.NewScanner(os.Stdin)
 
-	println(field.Export())
+	field := &Field{}
+	field.fromStream(scanner)
+
+	println(field.export())
+
+	state := &State{}
+	state.fromStream(scanner)
 }
 
 func l(data ...interface{}) {
 	fmt.Fprintln(os.Stderr, data...)
+}
+
+func boolToInt(value bool) index {
+	var result index
+	if value {
+		result = 1
+	}
+	return result
 }
